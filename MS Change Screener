@@ -1,0 +1,74 @@
+
+# crypto_market_structure_screener.py
+
+import ccxt
+import pandas as pd
+import time
+import datetime
+import requests
+from ta.trend import EMAIndicator
+
+# Configuration
+EXCHANGE = 'binance'
+SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT']
+TIMEFRAME = '30m'  # can be '15m', '1h', etc.
+CANDLE_LIMIT = 100
+DELAY = 60 * 15  # 15 minutes
+
+# Telegram Bot Configuration
+TELEGRAM_BOT_TOKEN = '7592469316:AAEkHB_6JxRCMVqFKlSH0b9NtBs3ZQIHyG0'
+TELEGRAM_CHAT_ID = '353643567'
+
+# Initialize exchange
+exchange = getattr(ccxt, EXCHANGE)()
+
+def fetch_ohlcv(symbol, timeframe, limit):
+    try:
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        return df
+    except Exception as e:
+        print(f"Error fetching data for {symbol}: {e}")
+        return None
+
+def detect_structure_change(df):
+    df['ema50'] = EMAIndicator(df['close'], window=50).ema_indicator()
+    latest = df.iloc[-1]
+    
+    if latest['close'] > max(df['high'][-10:]) and latest['close'] > latest['ema50']:
+        return 'Bullish Breakout'
+    elif latest['close'] < min(df['low'][-10:]) and latest['close'] < latest['ema50']:
+        return 'Bearish Breakdown'
+    return None
+
+def alert_user(symbol, direction):
+    message = f"Market structure change detected for {symbol}: {direction}"
+    print(message)
+    send_telegram_message(message)
+
+def send_telegram_message(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        'chat_id': TELEGRAM_CHAT_ID,
+        'text': message
+    }
+    try:
+        response = requests.post(url, data=payload)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to send Telegram message: {e}")
+
+def run_screener():
+    while True:
+        print(f"Running screener at {datetime.datetime.now()}...")
+        for symbol in SYMBOLS:
+            df = fetch_ohlcv(symbol, TIMEFRAME, CANDLE_LIMIT)
+            if df is not None:
+                result = detect_structure_change(df)
+                if result:
+                    alert_user(symbol, result)
+        time.sleep(DELAY)
+
+if __name__ == '__main__':
+    run_screener()
